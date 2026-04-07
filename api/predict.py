@@ -1,15 +1,21 @@
 import os
 import time
-import numpy as np
+import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from joblib import load
-import logging
+
+# Try-import large ML libs to stay within Lambda bundle limits on Vercel
+try:
+  import numpy as np
+  from joblib import load
+  HAS_ML_LIBS = True
+except ImportError:
+  HAS_ML_LIBS = False
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("predict")
 
-MODEL_PATH = os.getenv("MODEL_PATH", "model.joblib")
+MODEL_PATH = os.getenv("MODEL_PATH", os.path.join(os.path.dirname(__file__), "..", "model.joblib"))
 model_bundle = None
 
 class Location(BaseModel):
@@ -35,6 +41,8 @@ def weather_impact(w: str | None) -> float:
 
 def load_model():
   global model_bundle
+  if not HAS_ML_LIBS:
+    return None
   if model_bundle is not None:
     return model_bundle
   try:
@@ -52,7 +60,7 @@ app = FastAPI()
 @app.get("/health")
 def health():
   bundle = load_model()
-  return {"ok": True, "model": bool(bundle)}
+  return {"ok": True, "model": bool(bundle), "ml_libs": HAS_ML_LIBS}
 
 @app.post("/predict")
 def predict(reading: Reading):
@@ -74,7 +82,7 @@ def predict(reading: Reading):
   }
   t0 = time.time()
   try:
-    if bundle:
+    if bundle and HAS_ML_LIBS:
       clf = bundle["model"]
       feats = bundle["features"]
       X = np.array([[features[f] if features[f] is not None else -120 for f in feats]])
@@ -100,3 +108,4 @@ def predict(reading: Reading):
     }
   except Exception as e:
     raise HTTPException(status_code=500, detail=f"Prediction error: {e}")
+
