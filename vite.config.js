@@ -20,6 +20,14 @@ export default defineConfig({
       "/prediction": {
         target: "http://localhost:3000",
         changeOrigin: true
+      },
+      "/demo": {
+        target: "http://localhost:3000",
+        changeOrigin: true
+      },
+      "/control": {
+        target: "http://localhost:3000",
+        changeOrigin: true
       }
     }
   }
