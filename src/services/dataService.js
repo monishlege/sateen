@@ -4,7 +4,7 @@ import { sanitizeReading, sanitizePrediction } from "../utils/validation";
 import { log, warn, error } from "../utils/logger";
 
 const MS_30_MIN = 30 * 60 * 1000;
-const NODE_URL = import.meta.env.VITE_NODE_URL || (import.meta.env.PROD ? "/api" : "http://localhost:3000");
+const NODE_URL = import.meta.env.VITE_NODE_URL || (import.meta.env.PROD ? "/api" : "");
 const POLL_INTERVAL_MS = 1000;
 
 export async function triggerDemoTick() {
