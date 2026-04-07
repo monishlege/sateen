@@ -7,6 +7,16 @@ const MS_30_MIN = 30 * 60 * 1000;
 const NODE_URL = import.meta.env.VITE_NODE_URL || (import.meta.env.PROD ? "/api" : "http://localhost:3000");
 const POLL_INTERVAL_MS = 1000;
 
+export async function triggerDemoTick() {
+  try {
+    const resp = await fetch(`${NODE_URL}/demo/tick`);
+    return await resp.json();
+  } catch (e) {
+    error("triggerDemoTick failed", e.message);
+    return null;
+  }
+}
+
 export function subscribeReadings(onData, onErr) {
   try {
     if (!db) {

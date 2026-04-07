@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { subscribeReadings, subscribeLatestPrediction } from "./services/dataService";
+import { subscribeReadings, subscribeLatestPrediction, triggerDemoTick } from "./services/dataService";
 import { log, warn } from "./utils/logger";
 import SignalChart from "./components/SignalChart.jsx";
 import PredictionCard from "./components/PredictionCard.jsx";
@@ -28,6 +28,19 @@ function Dashboard() {
       try { unsubR(); } catch {}
       try { unsubP(); } catch {}
     };
+  }, []);
+
+  // Auto-seed for demo if on Vercel or Prod
+  useEffect(() => {
+    const isVercel = window.location.hostname.includes("vercel.app");
+    const isProd = import.meta.env.PROD;
+    if (!isVercel && !isProd) return;
+
+    log("Auto-seeding enabled for demo");
+    const interval = setInterval(() => {
+      triggerDemoTick().catch(e => warn("demo tick failed", e));
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const latestReading = useMemo(() => readings[readings.length - 1] || null, [readings]);

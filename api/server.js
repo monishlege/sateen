@@ -247,6 +247,109 @@ app.post("/control/lean", auth, (req, res) => {
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+// Demo Seeding Helpers
+function weatherFor(i) {
+  return ["Clear", "Cloudy", "Light Rain", "Heavy Rain"][Math.floor(i / 10) % 4];
+}
+function simulateReading(ts, elev, weather, location) {
+  const base = {
+    "Clear": [0, 0, 0, 0],
+    "Cloudy": [5, 5, 7, 10],
+    "Light Rain": [10, 12, 18, 25],
+    "Heavy Rain": [15, 20, 30, 40]
+  }[weather];
+  const rnd = (a) => a + (Math.random() * 2 - 1.0) * 3;
+  return {
+    timestamp: ts,
+    l_dbm: rnd(-70 - base[0]),
+    s_dbm: rnd(-65 - base[1]),
+    c_dbm: rnd(-55 - base[2]),
+    x_dbm: rnd(-45 - base[3]),
+    temperature: rnd(25),
+    humidity: rnd(60),
+    elevation_deg: elev,
+    weather,
+    location
+  };
+}
+async function getIssLocation() {
+  try {
+    const response = await axios.get("http://api.open-notify.org/iss-now.json", { timeout: 3000 });
+    const lat = parseFloat(response.data.iss_position.latitude);
+    const lon = parseFloat(response.data.iss_position.longitude);
+    try {
+      const geoResponse = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`, { timeout: 3000 });
+      const locality = geoResponse.data.locality || geoResponse.data.principalSubdivision || "Unknown";
+      return { lat, lon, name: locality };
+    } catch (e) {
+      return { lat, lon, name: "Unknown Area" };
+    }
+  } catch (e) {
+    return { lat: 12.97, lon: 77.59, name: "Bangalore" };
+  }
+}
+
+app.get("/demo/tick", async (req, res) => {
+  try {
+    const i = Math.floor(Date.now() / 1000) % 1000;
+    const ts = Date.now();
+    const elev = Math.max(5, Math.min(85, 10 + 70 * Math.sin(i / 30.0)));
+    const w = weatherFor(i);
+    const location = await getIssLocation();
+    const payload = simulateReading(ts, elev, w, location);
+
+    // Reuse internal ingestion logic
+    // We can't easily call app.post("/ingest") internally with full middleware support easily,
+    // so we replicate the core ingestion logic or refactor it.
+    // Let's refactor the ingestion logic into a function.
+    const result = await processIngestion(payload);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    log.error({ err: e.message }, "Demo tick failed");
+    res.status(500).json({ error: e.message });
+  }
+});
+
+async function processIngestion(r) {
+  const key = Math.floor(r.timestamp);
+  if (r.lean_deg === null || r.lean_deg === undefined) {
+    r.lean_deg = currentLeanDeg;
+  }
+  memReadings.set(key, r);
+  if (memReadings.size > 2000) {
+    const oldest = [...memReadings.keys()].sort((a, b) => a - b)[0];
+    memReadings.delete(oldest);
+  }
+  if (fdb) {
+    try { await fdb.ref(`/readings/${key}`).set(r); } catch (e) { log.warn(e.message); }
+  }
+
+  let pred;
+  try {
+    const predictUrl = FASTAPI_URL || "/api/predict";
+    // Internal predict call logic
+    // On Vercel, we can try to call the predict.py directly if we knew how, 
+    // but easiest is to call the absolute URL or use the rule-based fallback.
+    // For the demo tick, we'll use rulePredict if FASTAPI_URL isn't fully qualified.
+    if (predictUrl && predictUrl.startsWith("http")) {
+      const resp = await axios.post(`${predictUrl}/predict`, r, { timeout: 2000 });
+      pred = resp.data;
+    } else {
+      pred = rulePredict(r);
+    }
+  } catch (e) {
+    pred = rulePredict(r);
+  }
+  latestPrediction = pred;
+  if (fdb) {
+    try {
+      await fdb.ref(`/predictions/latest`).set(pred);
+      await fdb.ref(`/predictions/${pred.timestamp || key}`).set(pred);
+    } catch (e) { log.warn(e.message); }
+  }
+  return { key, pred };
+}
+
 if (process.env.NODE_ENV !== "production") {
   app.listen(Number(PORT), () => {
     log.info({ port: PORT }, "Dev Node API listening");
