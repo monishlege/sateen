@@ -231,7 +231,7 @@ function simulateReading(ts, elev, weather, location) {
 }
 async function getIssLocation() {
   try {
-    const response = await axios.get("http://api.open-notify.org/iss-now.json", { timeout: 3000 });
+    const response = await axios.get("https://api.open-notify.org/iss-now.json", { timeout: 3000 });
     const lat = parseFloat(response.data.iss_position.latitude);
     const lon = parseFloat(response.data.iss_position.longitude);
     try {
