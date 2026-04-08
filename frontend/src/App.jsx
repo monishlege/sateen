@@ -32,7 +32,6 @@ function Dashboard() {
     };
   }, []);
 
-  // Auto-seed for demo (enabled by default; disable with VITE_DEMO_AUTOTICK=false)
   useEffect(() => {
     const autoTickEnabled = import.meta.env.VITE_DEMO_AUTOTICK !== "false";
     if (!autoTickEnabled) return;
@@ -46,17 +45,11 @@ function Dashboard() {
 
   const latestReading = useMemo(() => readings[readings.length - 1] || null, [readings]);
 
-  useEffect(() => {
-    if (latestReading) log("latest reading", latestReading);
-    if (prediction) log("latest prediction", prediction);
-  }, [latestReading, prediction]);
-
   const locationInfo = useMemo(() => {
     if (!latestReading || !latestReading.location) return "Locating ISS...";
     const { lat, lon } = latestReading.location;
     const name = latestReading.location.name || latestReading.locationName;
     const coordStr = `${Math.abs(lat).toFixed(2)}°${lat >= 0 ? "N" : "S"}, ${Math.abs(lon).toFixed(2)}°${lon >= 0 ? "E" : "W"}`;
-    
     if (name && name !== "Unknown Area" && name !== "Unknown") {
       return `ISS monitoring over ${name} (${coordStr})`;
     }
@@ -92,10 +85,6 @@ function Dashboard() {
           <ISSLiveFeed />
           <BandStatus latestReading={latestReading} />
         </div>
-      </div>
-
-      <div className="mt-6 text-xs text-gray-500">
-        Data window: last 30 minutes. Values shown are sanitized and may omit invalid samples.
       </div>
     </div>
   );

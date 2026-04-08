@@ -16,11 +16,14 @@ const {
   PORT = 3000,
   ARDUINO_TOKEN = "dev-token",
   FASTAPI_URL,
+  FRONTEND_ORIGIN,
   FIREBASE_DB_URL,
   FIREBASE_SERVICE_ACCOUNT_PATH,
   JWT_SECRET,
   JWT_ISSUER,
-  ADMIN_KEY
+  ADMIN_KEY,
+  ISS_API_URL = "https://api.wheretheiss.at/v1/satellites/25544",
+  ISS_API_KEY
 } = process.env;
 
 const defaultUsers = [
@@ -49,15 +52,29 @@ const readingSchema = z.object({
   lean_deg: z.number().nullable().optional(),
   weather: z.string().max(64).optional(),
   location: z.object({ lat: z.number(), lon: z.number(), name: z.string().max(256).optional() }).optional(),
+  iss_api: z.object({
+    id: z.number().optional(),
+    name: z.string().optional(),
+    altitude: z.number().optional(),
+    velocity: z.number().optional(),
+    visibility: z.string().optional(),
+    footprint: z.number().optional(),
+    timestamp: z.number().optional(),
+    daynum: z.number().optional(),
+    solar_lat: z.number().optional(),
+    solar_lon: z.number().optional(),
+    units: z.string().optional(),
+  }).optional(),
 });
 
 const app = express();
-app.use(cors()); // Allow all for simplicity on Vercel, or configure specifically
+const corsOptions = FRONTEND_ORIGIN ? { origin: FRONTEND_ORIGIN } : undefined;
+app.use(cors(corsOptions));
 app.use(express.json({ limit: "256kb" }));
 
 const memReadings = new Map();
 let latestPrediction = null;
-let currentLeanDeg = 0;
+let lastKnownIssLocation = null;
 
 let firebaseReady = false;
 try {
@@ -191,17 +208,6 @@ app.get("/prediction/latest", (req, res) => {
   res.json(latestPrediction || null);
 });
 
-app.get("/control/lean", (req, res) => {
-  res.json({ lean_deg: currentLeanDeg });
-});
-
-app.post("/control/lean", (req, res) => {
-  const { lean_deg } = req.body || {};
-  if (typeof lean_deg !== "number") return res.status(400).json({ error: "lean_deg must be a number" });
-  currentLeanDeg = lean_deg;
-  res.json({ ok: true, lean_deg: currentLeanDeg });
-});
-
 app.get("/health", (req, res) => res.json({ ok: true }));
 
 // Demo Seeding Helpers
@@ -226,23 +232,78 @@ function simulateReading(ts, elev, weather, location) {
     humidity: rnd(60),
     elevation_deg: elev,
     weather,
-    location
+    location: {
+      lat: location.lat,
+      lon: location.lon,
+      name: location.name,
+    },
+    iss_api: location.iss_api || null
   };
 }
 async function getIssLocation() {
   try {
-    const response = await axios.get("https://api.open-notify.org/iss-now.json", { timeout: 3000 });
-    const lat = parseFloat(response.data.iss_position.latitude);
-    const lon = parseFloat(response.data.iss_position.longitude);
+    const params = {};
+    const headers = {};
+    if (ISS_API_KEY) {
+      // Different ISS providers use different key names; send common variants.
+      params.apiKey = ISS_API_KEY;
+      params.apikey = ISS_API_KEY;
+      headers["x-api-key"] = ISS_API_KEY;
+      headers.Authorization = `Bearer ${ISS_API_KEY}`;
+    }
+    const response = await axios.get(ISS_API_URL, { timeout: 20000, params, headers });
+    const lat = Number(response.data.latitude);
+    const lon = Number(response.data.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      throw new Error("Invalid ISS coordinates");
+    }
     try {
-      const geoResponse = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`, { timeout: 3000 });
+      const geoResponse = await axios.get(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`, { timeout: 8000 });
       const locality = geoResponse.data.locality || geoResponse.data.principalSubdivision || "Unknown";
-      return { lat, lon, name: locality };
+      lastKnownIssLocation = {
+        lat,
+        lon,
+        name: locality,
+        iss_api: {
+          id: Number(response.data.id),
+          name: response.data.name,
+          altitude: Number(response.data.altitude),
+          velocity: Number(response.data.velocity),
+          visibility: response.data.visibility,
+          footprint: Number(response.data.footprint),
+          timestamp: Number(response.data.timestamp),
+          daynum: Number(response.data.daynum),
+          solar_lat: Number(response.data.solar_lat),
+          solar_lon: Number(response.data.solar_lon),
+          units: response.data.units,
+        }
+      };
+      return lastKnownIssLocation;
     } catch (e) {
-      return { lat, lon, name: "Unknown Area" };
+      lastKnownIssLocation = {
+        lat,
+        lon,
+        name: "Unknown Area",
+        iss_api: {
+          id: Number(response.data.id),
+          name: response.data.name,
+          altitude: Number(response.data.altitude),
+          velocity: Number(response.data.velocity),
+          visibility: response.data.visibility,
+          footprint: Number(response.data.footprint),
+          timestamp: Number(response.data.timestamp),
+          daynum: Number(response.data.daynum),
+          solar_lat: Number(response.data.solar_lat),
+          solar_lon: Number(response.data.solar_lon),
+          units: response.data.units,
+        }
+      };
+      return lastKnownIssLocation;
     }
   } catch (e) {
-    return { lat: 12.97, lon: 77.59, name: "Bangalore" };
+    log.warn({ err: e?.message }, "ISS API request failed");
+    if (lastKnownIssLocation) return lastKnownIssLocation;
+    return { lat: 0, lon: 0, name: "Unknown" };
   }
 }
 
@@ -270,9 +331,6 @@ app.get("/demo/tick", async (req, res) => {
 async function processIngestion(r) {
   const key = Math.floor(r.timestamp);
   log.info({ key, location: r.location?.name }, "Ingested reading");
-  if (r.lean_deg === null || r.lean_deg === undefined) {
-    r.lean_deg = currentLeanDeg;
-  }
   memReadings.set(key, r);
   if (memReadings.size > 2000) {
     const oldest = [...memReadings.keys()].sort((a, b) => a - b)[0];

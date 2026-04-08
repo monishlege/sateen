@@ -10,15 +10,7 @@ export function isValidBand(band) {
 
 export function sanitizeReading(raw) {
   const ts = toNumber(raw.timestamp, null);
-  const l = toNumber(raw.l_dbm, null);
-  const s = toNumber(raw.s_dbm, null);
-  const c = toNumber(raw.c_dbm, null);
-  const x = toNumber(raw.x_dbm, null);
-  const temp = toNumber(raw.temperature, null);
-  const hum = toNumber(raw.humidity, null);
-  const elev = toNumber(raw.elevation_deg, null);
-  const lean = toNumber(raw.lean_deg, null);
-  const weather = typeof raw.weather === "string" ? raw.weather : "Unknown";
+  if (ts === null) return null;
   const lat = toNumber(raw?.location?.lat, null);
   const lon = toNumber(raw?.location?.lon, null);
   const locationName = typeof raw?.location?.name === "string" ? raw.location.name : null;
@@ -35,31 +27,29 @@ export function sanitizeReading(raw) {
     solar_lon: toNumber(raw.iss_api.solar_lon, null),
     units: typeof raw.iss_api.units === "string" ? raw.iss_api.units : null
   } : null;
-  if (ts === null) return null;
   return {
     timestamp: ts,
-    l_dbm: l,
-    s_dbm: s,
-    c_dbm: c,
-    x_dbm: x,
-    temperature: temp,
-    humidity: hum,
-    elevation_deg: elev,
-    lean_deg: lean,
-    weather,
+    l_dbm: toNumber(raw.l_dbm, null),
+    s_dbm: toNumber(raw.s_dbm, null),
+    c_dbm: toNumber(raw.c_dbm, null),
+    x_dbm: toNumber(raw.x_dbm, null),
+    temperature: toNumber(raw.temperature, null),
+    humidity: toNumber(raw.humidity, null),
+    elevation_deg: toNumber(raw.elevation_deg, null),
+    weather: typeof raw.weather === "string" ? raw.weather : "Unknown",
     iss_api: issApi,
-    location: lat !== null && lon !== null
-      ? { lat, lon, ...(locationName ? { name: locationName } : {}) }
-      : null
+    location: lat !== null && lon !== null ? { lat, lon, ...(locationName ? { name: locationName } : {}) } : null
   };
 }
 
 export function sanitizePrediction(raw) {
   const band = typeof raw.best_band === "string" ? raw.best_band : null;
-  const confidence = toNumber(raw.confidence, null);
-  const reasoning = typeof raw.reasoning === "string" ? raw.reasoning : "";
-  const ts = toNumber(raw.timestamp, null);
-  const ver = typeof raw.model_version === "string" ? raw.model_version : "unknown";
   if (!band || !isValidBand(band)) return null;
-  return { best_band: band, confidence, reasoning, timestamp: ts, model_version: ver };
+  return {
+    best_band: band,
+    confidence: toNumber(raw.confidence, null),
+    reasoning: typeof raw.reasoning === "string" ? raw.reasoning : "",
+    timestamp: toNumber(raw.timestamp, null),
+    model_version: typeof raw.model_version === "string" ? raw.model_version : "unknown"
+  };
 }
